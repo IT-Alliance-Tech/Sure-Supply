@@ -4,6 +4,7 @@ import { buildApiUrl, API_CONFIG } from '../../../config/api'
 import { uploadFile, generateFileName } from '../../../config/supabase'
 import { handleApiError, getErrorMessage, validateApiResponse } from '../../../utils/errorHandler'
 import './Owner.css'
+import Compressor from 'compressorjs'
 
 const AddProperty = ({ onClose, onSuccess }) => {
   const [formData, setFormData] = useState({
@@ -103,71 +104,176 @@ const AddProperty = ({ onClose, onSuccess }) => {
     }))
   }
 
-  const handleMediaChange = (e) => {
-    const files = Array.from(e.target.files)
+  // const handleMediaChange = (e) => {
+  //   const files = Array.from(e.target.files)
+
+  //   console.log(e.target.files);
     
-    if (files.length === 0) return
+    
+  //   if (files.length === 0) return
 
-    // Validate file types and sizes
-    const validFiles = []
-    const errors = []
+  //   // Validate file types and sizes
+  //   const validFiles = []
+  //   const errors = []
 
-    files.forEach(file => {
-      const isImage = allowedTypes.images.includes(file.type)
-      const isVideo = allowedTypes.videos.includes(file.type)
+  //   files.forEach(file => {
+  //     const isImage = allowedTypes.images.includes(file.type)
+  //     const isVideo = allowedTypes.videos.includes(file.type)
       
-      if (!isImage && !isVideo) {
-        errors.push(`${file.name}: Invalid file type. Only images and videos are allowed.`)
-        return
-      }
+  //     if (!isImage && !isVideo) {
+  //       errors.push(`${file.name}: Invalid file type. Only images and videos are allowed.`)
+  //       return
+  //     }
 
-      // Size validation (10MB for images, 100MB for videos)
-      const maxSize = isImage ? 10 * 1024 * 1024 : 100 * 1024 * 1024
-      if (file.size > maxSize) {
-        const sizeLimit = isImage ? '10MB' : '100MB'
-        errors.push(`${file.name}: File too large. Maximum size: ${sizeLimit}`)
-        return
-      }
+  //     console.log(files);
+      
 
-      validFiles.push(file)
-    })
+  //     // Size validation (10MB for images, 100MB for videos)
+  //     const maxSize = isImage ? 10 * 1024 * 1024 : 100 * 1024 * 1024
+  //     console.log("maxSize=", maxSize);
+      
+  //     if (file.size > maxSize) {
+  //       const sizeLimit = isImage ? '10MB' : '100MB'
+  //       errors.push(`${file.name}: File too large. Maximum size: ${sizeLimit}`)
+  //       return
+  //     }
 
-    if (errors.length > 0) {
-      setError(errors.join('\n'))
+  //     validFiles.push(file)
+
+  //     console.log("validfiles=", validFiles);
+      
+  //   })
+
+  //   if (errors.length > 0) {
+  //     setError(errors.join('\n'))
+  //   }
+
+  //   if (validFiles.length > 0) {
+  //     // Add new files to existing ones
+  //     setMediaFiles(prev => [...prev, ...validFiles])
+      
+  //     // Create previews for new files
+  //     validFiles.forEach((file, index) => {
+  //       const reader = new FileReader()
+  //       reader.onload = (event) => {
+  //         const preview = {
+  //           id: Date.now() + index,
+  //           file,
+  //           type: allowedTypes.images.includes(file.type) ? 'image' : 'video',
+  //           url: event.target.result,
+  //           name: file.name
+  //         }
+  //         setMediaPreviews(prev => [...prev, preview])
+  //       }
+  //       reader.readAsDataURL(file)
+  //     })
+  //   }
+
+  //   // Clear input
+  //   e.target.value = ''
+  // }
+
+  // const removeMedia = (id) => {
+  //   setMediaPreviews(prev => prev.filter(preview => preview.id !== id))
+  //   setMediaFiles(prev => {
+  //     const preview = mediaPreviews.find(p => p.id === id)
+  //     return prev.filter(file => file !== preview?.file)
+  //   })
+  // }
+
+
+
+
+  const handleMediaChange = (e) => {
+  const files = Array.from(e.target.files)
+  if (files.length === 0) return
+
+  const validFiles = []
+  const errors = []
+
+  files.forEach(file => {
+    const isImage = allowedTypes.images.includes(file.type)
+    const isVideo = allowedTypes.videos.includes(file.type)
+
+    if (!isImage && !isVideo) {
+      errors.push(`${file.name}: Invalid file type. Only images and videos are allowed.`)
+      return
     }
 
-    if (validFiles.length > 0) {
-      // Add new files to existing ones
-      setMediaFiles(prev => [...prev, ...validFiles])
-      
-      // Create previews for new files
-      validFiles.forEach((file, index) => {
-        const reader = new FileReader()
-        reader.onload = (event) => {
-          const preview = {
-            id: Date.now() + index,
-            file,
-            type: allowedTypes.images.includes(file.type) ? 'image' : 'video',
-            url: event.target.result,
-            name: file.name
+    // max size in bytes
+    const maxSize = isImage ? 10 * 1024 * 1024 : 100 * 1024 * 1024
+
+    if (isImage) {
+      // compress image before pushing
+      new Compressor(file, {
+        quality: 0.6, // adjust 0.1 - 1.0
+        maxWidth: 1920, // optional resize
+        maxHeight: 1080,
+        success(compressedFile) {
+
+          console.log(compressedFile.size,"====", isImage, "====", maxSize, "======", file.size);
+          
+          if (compressedFile.size > maxSize) {
+            errors.push(`${file.name}: Could not compress below ${maxSize / (1024*1024)}MB`)
+            return
           }
-          setMediaPreviews(prev => [...prev, preview])
+          addValidFile(compressedFile, 'image')
+        },
+        error(err) {
+          console.error('Compression failed:', err.message)
+          errors.push(`${file.name}: Compression failed`)
         }
-        reader.readAsDataURL(file)
       })
+    } else if (isVideo) {
+      // ⚠️ browser-side video compression needs ffmpeg.wasm
+      // For now just push if under limit
+      if (file.size > maxSize) {
+        errors.push(`${file.name}: Video too large (needs ffmpeg or server-side compression)`)
+        return
+      }
+      addValidFile(file, 'video')
     }
+  })
 
-    // Clear input
-    e.target.value = ''
+  if (errors.length > 0) {
+    setError(errors.join('\n'))
   }
 
-  const removeMedia = (id) => {
+  // helper to create preview + store file
+  function addValidFile(file, type) {
+    setMediaFiles(prev => [...prev, file])
+
+    const reader = new FileReader()
+    reader.onload = (event) => {
+      const preview = {
+        id: Date.now() + Math.random(),
+        file,
+        type,
+        url: event.target.result,
+        name: file.name
+      }
+      setMediaPreviews(prev => [...prev, preview])
+    }
+    reader.readAsDataURL(file)
+  }
+
+  // reset input
+  e.target.value = ''
+}
+
+
+const removeMedia = (id) => {
     setMediaPreviews(prev => prev.filter(preview => preview.id !== id))
     setMediaFiles(prev => {
       const preview = mediaPreviews.find(p => p.id === id)
       return prev.filter(file => file !== preview?.file)
     })
   }
+
+
+
+
+
 
   const uploadAllMedia = async () => {
     if (mediaFiles.length === 0) return []

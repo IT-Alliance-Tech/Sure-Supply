@@ -20,10 +20,10 @@ const TermsAndConditions = () => {
 
                 <ul>
                     <li>
-                        <strong>Account</strong> means and includes the account created on the Site, by the User, in accordance with the terms of the Agreement, registered with and approved by NoBroker.
+                        <strong>Account</strong> means and includes the account created on the Site, by the User, in accordance with the terms of the Agreement, registered with and approved by TruOwners.
                     </li>
                     <li>
-                        <strong>Agreement</strong> means and includes the Terms and Conditions, Privacy Policy and any other such terms and conditions that may be mutually agreed upon between NoBroker and the User in relation to the Services.
+                        <strong>Agreement</strong> means and includes the Terms and Conditions, Privacy Policy and any other such terms and conditions that may be mutually agreed upon between TruOwners and the User in relation to the Services.
                     </li>
                     <li>
                         <strong>Applicable Law</strong> means and includes any statute, law, regulation, sub-ordinate legislation, ordinance, rule, judgment, rule of law, order (interim or final), writ, decree, clearance, Authorizations...

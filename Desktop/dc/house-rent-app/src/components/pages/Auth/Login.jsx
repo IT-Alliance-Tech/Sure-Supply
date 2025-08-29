@@ -81,7 +81,7 @@ const Login = ({ onClose, onSwitchToSignUp }) => {
       }
   
       if (!response.ok) {
-        throw new Error(data.error || handleApiError(null, response))
+        throw new Error(data.error.message || handleApiError(null, response))
       }
   
       if (data.success) {

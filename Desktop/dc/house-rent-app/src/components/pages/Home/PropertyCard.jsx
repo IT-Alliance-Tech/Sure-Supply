@@ -324,7 +324,7 @@ const PropertyCard = ({
 
         <div className="property-card__actions">
           <button
-            className={`property-card__action-btn ${isAuthenticated ? 'authenticated' : 'unauthenticated'}`}
+            className={`property-card__action-btn ${isAuthenticated ? 'authenticated' : 'unauthenticated'} rounded-2`}
             onClick={handleViewDetailsClick}
             type="button"
             disabled={!propertyId} // Disable if no valid ID

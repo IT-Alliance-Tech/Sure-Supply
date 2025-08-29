@@ -9,7 +9,8 @@ import './Auth.css'
 const OwnerSignUp = ({ onClose, onSwitchToLogin }) => {
   const [currentStep, setCurrentStep] = useState('signup') // 'signup' or 'otp'
   const [formData, setFormData] = useState({
-    name: '',
+    firstname: '',
+    lastname: '',
     email: '',
     password: '',
     confirmPassword: '',
@@ -82,8 +83,8 @@ const OwnerSignUp = ({ onClose, onSwitchToLogin }) => {
   }
 
   const validateForm = () => {
-    if (!formData.name.trim()) {
-      setError('Name is required')
+    if (!formData.firstname.trim()) {
+      setError('First name is required')
       return false
     }
     if (!formData.email.trim()) {
@@ -157,7 +158,7 @@ const OwnerSignUp = ({ onClose, onSwitchToLogin }) => {
 
       if (!response.ok) {
         const errorMessage = handleApiError(null, response)
-        throw new Error(data.error || errorMessage)
+        throw new Error(data.error.message || errorMessage)
       }
 
       if (data.success) {
@@ -284,7 +285,7 @@ const OwnerSignUp = ({ onClose, onSwitchToLogin }) => {
             <div>
               <div className="form-row">
                 <div className="form-group">
-                  <label htmlFor="name">First Name *</label>
+                  <label htmlFor="firstname">First Name *</label>
                   <input
                     type="text"
                     id="firstname"
@@ -297,7 +298,7 @@ const OwnerSignUp = ({ onClose, onSwitchToLogin }) => {
                 </div>
 
                 <div className="form-group">
-                  <label htmlFor="email">Last Name *</label>
+                  <label htmlFor="lastname">Last Name *</label>
                   <input
                     type="text"
                     id="lastname"
@@ -325,7 +326,7 @@ const OwnerSignUp = ({ onClose, onSwitchToLogin }) => {
                   />
                 </div>
                   <div className="form-group">
-                  <label htmlFor="name">Phone Number *</label>
+                  <label htmlFor="phone">Phone Number *</label>
                   <input
                     type="number"
                     id="phone"

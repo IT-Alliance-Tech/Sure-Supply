@@ -682,25 +682,25 @@ const PropertyDetailsPage = () => {
 
 
   function timeAgo(dateString) {
-  const now = new Date();
-  const created = new Date(dateString);
-  const diff = Math.floor((now - created) / 1000); // in seconds
+    const now = new Date();
+    const created = new Date(dateString);
+    const diff = Math.floor((now - created) / 1000); // in seconds
 
-  const minutes = Math.floor(diff / 60);
-  const hours = Math.floor(diff / 3600);
-  const days = Math.floor(diff / 86400);
-  const weeks = Math.floor(diff / 604800);
-  const months = Math.floor(diff / 2592000); // approx 30 days
-  const years = Math.floor(diff / 31536000);
+    const minutes = Math.floor(diff / 60);
+    const hours = Math.floor(diff / 3600);
+    const days = Math.floor(diff / 86400);
+    const weeks = Math.floor(diff / 604800);
+    const months = Math.floor(diff / 2592000); // approx 30 days
+    const years = Math.floor(diff / 31536000);
 
-  if (years > 0) return years + (years === 1 ? " year ago" : " years ago");
-  if (months > 0) return months + (months === 1 ? " month ago" : " months ago");
-  if (weeks > 0) return weeks + (weeks === 1 ? " week ago" : " weeks ago");
-  if (days > 0) return days + (days === 1 ? " day ago" : " days ago");
-  if (hours > 0) return hours + (hours === 1 ? " hour ago" : " hours ago");
-  if (minutes > 0) return minutes + (minutes === 1 ? " minute ago" : " minutes ago");
-  return "just now";
-}
+    if (years > 0) return years + (years === 1 ? " year ago" : " years ago");
+    if (months > 0) return months + (months === 1 ? " month ago" : " months ago");
+    if (weeks > 0) return weeks + (weeks === 1 ? " week ago" : " weeks ago");
+    if (days > 0) return days + (days === 1 ? " day ago" : " days ago");
+    if (hours > 0) return hours + (hours === 1 ? " hour ago" : " hours ago");
+    if (minutes > 0) return minutes + (minutes === 1 ? " minute ago" : " minutes ago");
+    return "just now";
+  }
 
 
 
@@ -1055,21 +1055,22 @@ const PropertyDetailsPage = () => {
               {similarProperties?.map((item, index) =>
                 index < 3 &&
                 (
-                  <div className='my-3 mb-4'>
+                  <div className='my-3 mb-md-4'>
                     <div style={{ boxShadow: "0 4px 20px rgba(0, 0, 0, 0.1)", maxWidth: "325px" }}
                       className='rounded-2 my-2 py-2 px-3 d-flex justify-content-between align-items-center'>
                       <img src={trueOwnersLogo} alt='truowners' width={110} />
                       <span> {timeAgo(item?.createdAt)}</span>
                     </div>
-                    <PropertyCard
-                      key={item.id}
-                      property={item}
-                      // isInWishlist={wishlist.includes(property.id)}
-                      onWishlistToggle={() => handleWishlistToggle(item.id)}
-                      onClick={() => handlePropertyClick(item)}
-                      // onLoginRequired={handleLoginRequired}
-                      isAuthenticated={isAuthenticated}
-                    />
+                    <div>
+                      <PropertyCard
+                        key={item.id}
+                        property={item}
+                        // isInWishlist={wishlist.includes(property.id)}
+                        onWishlistToggle={() => handleWishlistToggle(item.id)}
+                        onClick={() => handlePropertyClick(item)}
+                        // onLoginRequired={handleLoginRequired}
+                        isAuthenticated={isAuthenticated}
+                      /></div>
                   </div>
                 )
               )}

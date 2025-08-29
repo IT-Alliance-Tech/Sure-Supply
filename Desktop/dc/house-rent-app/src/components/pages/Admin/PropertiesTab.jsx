@@ -1,5 +1,5 @@
-// PropertiesTab.jsx  —  Enhanced (matches new dashboard styling)
-import React, { useState, useEffect, useMemo } from 'react';
+// PropertiesTab.jsx - Updated with title search and mark as sold functionality
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Box,
   Typography,
@@ -33,14 +33,19 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
-  FormControlLabel,
-  Checkbox,
-  FormGroup,
   IconButton,
   Tooltip,
-  Fade,
   useTheme,
-  alpha
+  alpha,
+  Stack,
+  Badge,
+  Avatar,
+  List,
+  ListItem,
+  ListItemText,
+  ListItemAvatar,
+  Skeleton,
+  Snackbar
 } from '@mui/material';
 import {
   Search as SearchIcon,
@@ -48,398 +53,799 @@ import {
   FilterList,
   ExpandMore,
   Clear,
-  Refresh as RefreshIcon
+  Refresh as RefreshIcon,
+  Dashboard as DashboardIcon,
+  Home,
+  Person,
+  Email,
+  Phone,
+  LocationOn,
+  Bed,
+  Bathtub,
+  SquareFoot,
+  CalendarToday,
+  Sort,
+  CheckCircle,
+  Cancel,
+  Pending,
+  Publish,
+  CheckCircleOutline
 } from '@mui/icons-material';
 import { buildApiUrl, API_CONFIG } from '../../../config/api';
 
 const PropertiesTab = () => {
   const theme = useTheme();
 
-  /* ---------------- state ---------------- */
+  /* ---------------- State Management ---------------- */
   const [properties, setProperties] = useState([]);
-  const [query, setQuery] = useState('');
-  const [filters, setFilters] = useState({
-    status: 'all',
-    propertyType: 'all',
-    bedrooms: 'all',
-    amenities: [],
-    city: 'all'
-  });
-  const [filterOptions, setFilterOptions] = useState({
-    cities: [],
-    amenities: [],
-    propertyTypes: [],
-    phone_number: "",
-    email: ""
+  const [totalCount, setTotalCount] = useState(0);
+  const [statusBreakdown, setStatusBreakdown] = useState({});
+  const [searchQuery, setSearchQuery] = useState('');
+
+  // API filters matching your backend exactly
+  const [apiFilters, setApiFilters] = useState({
+    propertyId: '',
+    customerEmail: '',
+    customerName: '',
+    customerPhone: '',
+    status: '',
+    propertyType: '',
+    minRent: '',
+    maxRent: '',
+    bedrooms: '',
+    bathrooms: '',
+    title: '' // Add title filter for search
   });
 
+  // UI State
   const [page, setPage] = useState(0);
-  const [rowsPerPage, setRPP] = useState(10);
+  const [rowsPerPage, setRowsPerPage] = useState(10);
+  const [sortBy, setSortBy] = useState('createdAt');
+  const [sortOrder, setSortOrder] = useState('desc');
 
+  // Loading & Error States
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState(null);
+  const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'info' });
 
+  // Dialog States
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [selected, setSelected] = useState(null);
-  const [reviewLoading, setReviewLoading] = useState(false);
-  const [publishLoading, setPublishLoading] = useState(false);
+  const [selectedProperty, setSelectedProperty] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
 
-  /* -------------- fetch ------------------ */
-  const fetchProperties = async () => {
+  // Filter options
+  const [filterOptions] = useState({
+    propertyTypes: ['apartment', 'house', 'villa', 'studio', 'commercial'],
+    statuses: ['pending', 'approved', 'published', 'rejected', 'sold']
+  });
+
+  /* ---------------- Title Search Functionality ---------------- */
+  // Debounced title search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setApiFilters(prev => ({ ...prev, title: searchQuery }));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  /* ---------------- API Integration ---------------- */
+  const buildQueryParams = useCallback(() => {
+    const params = new URLSearchParams();
+
+    // Pagination (API expects 1-based page numbers)
+    params.append('page', (page + 1).toString());
+    params.append('limit', rowsPerPage.toString());
+
+    // Sorting
+    params.append('sortBy', sortBy);
+    params.append('sortOrder', sortOrder);
+
+    // Filters - only add non-empty values
+    Object.entries(apiFilters).forEach(([key, value]) => {
+      if (value && value.toString().trim()) {
+        params.append(key, value.toString().trim());
+      }
+    });
+
+    return params.toString();
+  }, [page, rowsPerPage, sortBy, sortOrder, apiFilters]);
+
+  const fetchProperties = useCallback(async (showLoading = false) => {
     try {
-      setRefreshing(true);
+      if (showLoading) setLoading(true);
+      else setRefreshing(true);
+
       const token = localStorage.getItem('adminToken');
+      if (!token) throw new Error('Authentication required');
 
-      const res = await fetch(buildApiUrl(API_CONFIG.ADMIN.PROPERTIES), {
+      const queryParams = buildQueryParams();
+      const url = `${buildApiUrl(API_CONFIG.ADMIN.PROPERTIES)}?${queryParams}`;
+
+      const response = await fetch(url, {
         headers: { Authorization: `Bearer ${token}` }
+
       });
-      const json = await res.json();
-      if (!json.success) throw new Error();
 
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
 
-      setProperties(json.data.properties || []);
-      /* generate select options */
-      const cities = [...new Set(json.data.properties.map(p => p.location?.city).filter(Boolean))];
-      const amenities = [...new Set(json.data.properties.flatMap(p => p.amenities || []))];
-      const types = [...new Set(json.data.properties.map(p => p.propertyType).filter(Boolean))];
-      const phone_number = json.data.properties.map(p => p.owner?.phone_number).filter(Boolean);
-      const email = [...new Set(json.data.properties.map(p => p.owner?.email).filter(Boolean))];
-      setFilterOptions({ cities: cities.sort(), amenities: amenities.sort(), propertyTypes: types.sort(), phone_number: phone_number.sort(), email: email.sort() });
+      const data = await response.json();
 
+      if (!data.success) {
+        throw new Error(data.error?.message || 'Failed to fetch properties');
+      }
+
+      // Set data from API response
+      setProperties(data.data.properties || []);
+      setTotalCount(data.data.pagination?.totalProperties || 0);
+      setStatusBreakdown(data.data.statusBreakdown || {});
       setError(null);
-    } catch (e) {
-      console.error(e);
-      setError('Failed to fetch properties');
+
+    } catch (err) {
+      console.error('Fetch properties error:', err);
+      setError(err.message);
+      setSnackbar({
+        open: true,
+        message: `Error: ${err.message}`,
+        severity: 'error'
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
+  }, [buildQueryParams]);
+
+  // Initial load
+  useEffect(() => {
+    fetchProperties(true);
+  }, []);
+
+  // Refetch when filters/sorting change
+  useEffect(() => {
+    if (!loading) {
+      setPage(0); // Reset to first page when filters change
+      fetchProperties();
+    }
+  }, [apiFilters, sortBy, sortOrder, rowsPerPage]);
+
+  // Refetch when page changes
+  useEffect(() => {
+    if (!loading) {
+      fetchProperties();
+    }
+  }, [page]);
+
+  /* ---------------- Filter Management ---------------- */
+  const handleFilterChange = (key, value) => {
+    setApiFilters(prev => ({ ...prev, [key]: value }));
   };
-  useEffect(() => { fetchProperties(); }, []);
 
-  console.log(filterOptions);
-  
+  const clearAllFilters = () => {
+    setApiFilters({
+      propertyId: '',
+      customerEmail: '',
+      customerName: '',
+      customerPhone: '',
+      status: '',
+      propertyType: '',
+      minRent: '',
+      maxRent: '',
+      bedrooms: '',
+      bathrooms: '',
+      title: ''
+    });
+    setSearchQuery('');
+  };
 
-  /* -------------- helpers --------------- */
-  const handleFilter = (key, val) =>
-    setFilters(prev => ({ ...prev, [key]: val }));
+  const activeFiltersCount = Object.values(apiFilters).filter(v =>
+    v && v.toString().trim()
+  ).length;
 
-  const toggleAmenity = (amenity, checked) =>
-    setFilters(prev => ({
-      ...prev,
-      amenities: checked
-        ? [...prev.amenities, amenity]
-        : prev.amenities.filter(a => a !== amenity)
-    }));
-
-  const resetFilters = () =>
-    setFilters({ status: 'all', propertyType: 'all', bedrooms: 'all', amenities: [], city: 'all' });
-
-  const statusColor = s =>
-    ({ pending: 'warning', approved: 'success', published: 'info', rejected: 'error' }[s] || 'default');
-
-  /* ------------- derived --------------- */
-  const filtered = useMemo(() => {
-    let list = [...properties];
-
-    /* search */
-    if (query)
-      list = list.filter(p =>
-        [p.title, p.location?.address, p.location?.city]
-          .filter(Boolean)
-          .some(v => v.toLowerCase().includes(query.toLowerCase()))
-      );
-
-    /* filters */
-    if (filters.status !== 'all') list = list.filter(p => p.status === filters.status);
-    if (filters.propertyType !== 'all') list = list.filter(p => p.propertyType === filters.propertyType);
-    if (filters.bedrooms !== 'all') list = list.filter(p => p.bedrooms === +filters.bedrooms);
-    if (filters.city !== 'all') list = list.filter(p => p.location?.city === filters.city);
-    if (filters.amenities.length)
-      list = list.filter(p => filters.amenities.every(a => p.amenities?.includes(a)));
-
-    return list;
-  }, [properties, query, filters]);
-
-  const paginated = useMemo(
-    () => filtered.slice(page * rowsPerPage, page * rowsPerPage + rowsPerPage),
-    [filtered, page, rowsPerPage]
-  );
-
-
-  const activeFilterCount = Object.values(filters).filter(v => (Array.isArray(v) ? v.length : v !== 'all')).length;
-
-  /* --------------- review / publish ------------- */
-  const callReview = async (id, status) => {
-    const token = localStorage.getItem('adminToken');
+  /* ---------------- Property Actions ---------------- */
+  const handlePropertyAction = async (propertyId, action, newStatus = null) => {
     try {
-      setReviewLoading(true);
-      await fetch(buildApiUrl(API_CONFIG.ADMIN.REVIEW_PROPERTY.replace(':id', id)), {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ status })
+      setActionLoading(true);
+      const token = localStorage.getItem('adminToken');
+
+      let endpoint, method = (action === 'review') ? 'PATCH' : 'PUT', body = null;
+
+      switch (action) {
+        case 'review':
+          endpoint = API_CONFIG.ADMIN.REVIEW_PROPERTY.replace(':id', propertyId);
+          body = JSON.stringify({ status: newStatus });
+          break;
+        case 'publish':
+          endpoint = API_CONFIG.ADMIN.PUBLISH_PROPERTY.replace(':id', propertyId);
+          body = JSON.stringify({ status: newStatus });
+          break;
+        case 'markSold':
+          endpoint = API_CONFIG.ADMIN.PUBLISH_PROPERTY.replace(':id', propertyId);
+          body = JSON.stringify({ status: newStatus });
+          break;
+        default:
+          throw new Error('Unknown action');
+      }
+
+      const response = await fetch(buildApiUrl(endpoint), {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`
+        },
+        ...(body && { body })
       });
-      await fetchProperties();
-    } finally { setReviewLoading(false); }
-  };
-  const callPublish = async id => {
-    const token = localStorage.getItem('adminToken');
-    try {
-      setPublishLoading(true);
-      await fetch(buildApiUrl(API_CONFIG.ADMIN.PUBLISH_PROPERTY.replace(':id', id)), {
-        method: 'PATCH',
-        headers: { Authorization: `Bearer ${token}` }
+
+      if (!response.ok) {
+        throw new Error(`Failed to ${action} property`);
+      }
+
+      const actionText = action === 'markSold' ? 'marked as sold' : `${action}ed`;
+      setSnackbar({
+        open: true,
+        message: `Property ${actionText} successfully`,
+        severity: 'success'
       });
+
       await fetchProperties();
-      setDialogOpen(false); setSelected(null);
-    } finally { setPublishLoading(false); }
+      setDialogOpen(false);
+
+    } catch (err) {
+      console.error(`Property ${action} error:`, err);
+      setSnackbar({
+        open: true,
+        message: `Error: ${err.message}`,
+        severity: 'error'
+      });
+    } finally {
+      setActionLoading(false);
+    }
   };
 
-  /* --------------- render ---------------- */
-  if (loading)
+  /* ---------------- UI Helpers ---------------- */
+  const getStatusColor = (status) => {
+    const colors = {
+      pending: 'warning',
+      approved: 'success',
+      published: 'info',
+      rejected: 'error',
+      sold: 'secondary'
+    };
+    return colors[status] || 'default';
+  };
+
+  const getStatusIcon = (status) => {
+    const icons = {
+      pending: <Pending />,
+      approved: <CheckCircle />,
+      published: <Publish />,
+      rejected: <Cancel />,
+      sold: <CheckCircleOutline />
+    };
+    return icons[status] || null;
+  };
+
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat('en-IN', {
+      style: 'currency',
+      currency: 'INR',
+      maximumFractionDigits: 0
+    }).format(amount);
+
+  /* ---------------- Loading State ---------------- */
+  if (loading) {
     return (
-      <Box display="flex" justifyContent="center" py={5}>
-        <CircularProgress size={32} />
+      <Box>
+        <Grid container spacing={3} mb={3}>
+          {[1, 2, 3, 4].map(i => (
+            <Grid item xs={12} sm={6} md={3} key={i}>
+              <Card>
+                <CardContent>
+                  <Skeleton variant="text" width="60%" />
+                  <Skeleton variant="text" width="40%" />
+                  <Skeleton variant="rectangular" height={60} sx={{ mt: 2 }} />
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
+        <Skeleton variant="rectangular" height={400} />
       </Box>
     );
-  if (error) return <Alert severity="error">{error}</Alert>;
+  }
 
+  /* ---------------- Main Render ---------------- */
   return (
     <Box>
-      {/* header */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4" sx={{ fontWeight: 700 }}>
-          Properties Management&nbsp;
-        </Typography>
+      {/* Header with Status Overview */}
+      <Box mb={4}>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
+          <Stack direction="row" alignItems="center" spacing={2}>
+            <DashboardIcon color="primary" fontSize="large" />
+            <Typography variant="h4" sx={{ fontWeight: 700 }}>
+              Properties Management
+            </Typography>
+            <Typography variant="subtitle1" alignItems="baseline" color="text.secondary" fontWeight={600}>
+              Total: {totalCount}
+            </Typography>
+          </Stack>
+          <Tooltip title="Refresh Data">
+            <IconButton
+              onClick={() => fetchProperties()}
+              disabled={refreshing}
+              sx={{
+                bgcolor: alpha(theme.palette.primary.main, 0.1),
+                '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.2) }
+              }}
+            >
+              <RefreshIcon color="primary" />
+            </IconButton>
+          </Tooltip>
+        </Box>
 
-        <Tooltip title="Refresh">
-          <IconButton
-            onClick={fetchProperties}
-            disabled={refreshing}
-            sx={{
-              bgcolor: alpha(theme.palette.primary.main, 0.1),
-              '&:hover': { bgcolor: alpha(theme.palette.primary.main, 0.2) }
-            }}
-          >
-            <RefreshIcon color="primary" />
-          </IconButton>
-        </Tooltip>
+        {/* Status Overview Cards */}
+        <Grid container spacing={2} mb={3}>
+          {Object.entries(statusBreakdown).map(([status, count]) => (
+            <Grid item xs={6} sm={3} lg={2.4} key={status}>
+              <Card
+                sx={{
+                  cursor: 'pointer',
+                  transition: 'all 0.2s',
+                  '&:hover': { transform: 'translateY(-2px)', boxShadow: 4 }
+                }}
+                onClick={() => handleFilterChange('status', status)}
+              >
+                <CardContent sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+                  <Avatar sx={{ bgcolor: theme.palette[getStatusColor(status)]?.main }}>
+                    {getStatusIcon(status)}
+                  </Avatar>
+                  <Box>
+                    <Typography variant="h6" fontWeight={600}>{count}</Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      {status.charAt(0).toUpperCase() + status.slice(1)}
+                    </Typography>
+                  </Box>
+                </CardContent>
+              </Card>
+            </Grid>
+          ))}
+        </Grid>
       </Box>
 
-      {/* search */}
-      <TextField
-        fullWidth
-        placeholder="Search by title, address or city…"
-        value={query}
-        onChange={e => { setQuery(e.target.value); setPage(0); }}
-        sx={{ mb: 3 }}
-        InputProps={{
-          startAdornment: (
-            <InputAdornment position="start">
-              <SearchIcon color="action" />
-            </InputAdornment>
-          )
-        }}
-      />
+      {/* Title Search Bar */}
+      <Box mb={3}>
+        <TextField
+          fullWidth
+          placeholder="Search by property title..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          InputProps={{
+            startAdornment: (
+              <InputAdornment position="start">
+                <SearchIcon color="action" />
+              </InputAdornment>
+            ),
+            endAdornment: searchQuery && (
+              <InputAdornment position="end">
+                <IconButton size="small" onClick={() => setSearchQuery('')}>
+                  <Clear />
+                </IconButton>
+              </InputAdornment>
+            )
+          }}
+        />
 
-      {/* filters */}
-      <Paper
-        elevation={0}
-        sx={{ mb: 3, border: `1px solid ${alpha(theme.palette.divider, 0.12)}`, borderRadius: 2 }}
-      >
-        <Accordion defaultExpanded={false}>
+        {/* Search hint */}
+        {searchQuery && (
+          <Box mt={1}>
+            <Typography variant="caption" color="text.secondary">
+              🔍 Searching by title: "{searchQuery}"
+            </Typography>
+          </Box>
+        )}
+      </Box>
+
+      {/* Advanced Filters */}
+      <Paper elevation={0} sx={{ mb: 3, border: `1px solid ${alpha(theme.palette.divider, 0.12)}`, borderRadius: 2 }}>
+        <Accordion>
           <AccordionSummary expandIcon={<ExpandMore />}>
-            <Box display="flex" alignItems="center" gap={1}>
+            <Box display="flex" alignItems="center" gap={2}>
               <FilterList />
               <Typography variant="subtitle1" fontWeight={600}>
-                Filters {activeFilterCount ? `(${activeFilterCount})` : ''}
+                Advanced Filters
               </Typography>
+              {activeFiltersCount > 0 && (
+                <Chip
+                  label={`${activeFiltersCount} active`}
+                  size="small"
+                  color="primary"
+                  variant="outlined"
+                />
+              )}
+              {refreshing && <CircularProgress size={16} />}
             </Box>
           </AccordionSummary>
 
           <AccordionDetails>
             <Grid container spacing={3}>
-              {/* status */}
-              <Grid item xs={6} md={2.4}>
-                <FormControl fullWidth size="small">
+              {/* Search Filters - First Row */}
+              <Grid item xs={12}>
+                <Typography
+                  variant="subtitle2"
+                  color="primary"
+                  fontWeight={600}
+                  gutterBottom
+                >
+                  Search Filters
+                </Typography>
+              </Grid>
+
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Property ID"
+                  value={apiFilters.propertyId}
+                  onChange={(e) => handleFilterChange('propertyId', e.target.value)}
+                  placeholder="Enter exact property ID..."
+                />
+              </Grid>
+
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Customer Name"
+                  value={apiFilters.customerName}
+                  onChange={(e) => handleFilterChange('customerName', e.target.value)}
+                  placeholder="Search by name..."
+                />
+              </Grid>
+
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Customer Phone"
+                  value={apiFilters.customerPhone}
+                  onChange={(e) => handleFilterChange('customerPhone', e.target.value)}
+                  placeholder="Search by phone..."
+                />
+              </Grid>
+
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  label="Customer Email"
+                  value={apiFilters.customerEmail}
+                  onChange={(e) => handleFilterChange('customerEmail', e.target.value)}
+                  placeholder="Search by email..."
+                />
+              </Grid>
+            </Grid>
+
+            {/* 🔹 New Grid for Property Filters */}
+            <Grid container spacing={3} sx={{ mt: 1 }}>
+              <Grid item xs={12}>
+                <Typography
+                  variant="subtitle2"
+                  color="primary"
+                  fontWeight={600}
+                  gutterBottom
+                >
+                  Property Filters
+                </Typography>
+              </Grid>
+
+              <Grid item xs={12} md={6}>
+                <FormControl sx={{ minWidth: 130 }} size="small">
                   <InputLabel>Status</InputLabel>
                   <Select
-                    value={filters.status}
+                    value={apiFilters.status}
                     label="Status"
-                    onChange={e => handleFilter('status', e.target.value)}
+                    onChange={(e) => handleFilterChange('status', e.target.value)}
                   >
-                    <MenuItem value="all">All</MenuItem>
-                    {['pending', 'approved', 'published', 'rejected'].map(s => (
-                      <MenuItem key={s} value={s}>{s.charAt(0).toUpperCase() + s.slice(1)}</MenuItem>
+                    <MenuItem value="">All Statuses</MenuItem>
+                    {filterOptions.statuses.map((status) => (
+                      <MenuItem key={status} value={status}>
+                        {status.charAt(0).toUpperCase() + status.slice(1)}
+                      </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
               </Grid>
 
-              {/* type */}
-              <Grid item xs={6} md={2.4}>
-                <FormControl fullWidth size="small">
-                  <InputLabel>Type</InputLabel>
+              <Grid item xs={12} md={6}>
+                <FormControl sx={{ minWidth: 150 }} size="small">
+                  <InputLabel>Property Type</InputLabel>
                   <Select
-                    value={filters.propertyType}
-                    label="Type"
-                    onChange={e => handleFilter('propertyType', e.target.value)}
+                    value={apiFilters.propertyType}
+                    label="Property Type"
+                    onChange={(e) => handleFilterChange('propertyType', e.target.value)}
                   >
-                    <MenuItem value="all">All</MenuItem>
-                    {filterOptions.propertyTypes.map(t => (
-                      <MenuItem key={t} value={t}>{t}</MenuItem>
+                    <MenuItem value="">All Types</MenuItem>
+                    {filterOptions.propertyTypes.map((type) => (
+                      <MenuItem key={type} value={type}>
+                        {type.charAt(0).toUpperCase() + type.slice(1)}
+                      </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
               </Grid>
 
-              {/* bedrooms */}
-              <Grid item xs={6} md={2.4}>
-                <FormControl fullWidth size="small">
+              <Grid item xs={12} md={6}>
+                <FormControl sx={{ minWidth: 130 }} size="small">
                   <InputLabel>Bedrooms</InputLabel>
                   <Select
-                    value={filters.bedrooms}
+                    value={apiFilters.bedrooms}
                     label="Bedrooms"
-                    onChange={e => handleFilter('bedrooms', e.target.value)}
+                    onChange={(e) => handleFilterChange('bedrooms', e.target.value)}
                   >
-                    <MenuItem value="all">Any</MenuItem>
-                    {[1, 2, 3, 4, 5].map(n => (
-                      <MenuItem key={n} value={n}>{n} BHK</MenuItem>
+                    <MenuItem value="">Any</MenuItem>
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <MenuItem key={num} value={num}>
+                        {num} BHK
+                      </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
               </Grid>
 
-              {/* city */}
-              <Grid item xs={6} md={2.4}>
-                <FormControl fullWidth size="small">
-                  <InputLabel>City</InputLabel>
+              <Grid item xs={12} md={6}>
+                <FormControl sx={{ minWidth: 130 }} size="small">
+                  <InputLabel>Bathrooms</InputLabel>
                   <Select
-                    value={filters.city}
-                    label="City"
-                    onChange={e => handleFilter('city', e.target.value)}
+                    value={apiFilters.bathrooms}
+                    label="Bathrooms"
+                    onChange={(e) => handleFilterChange('bathrooms', e.target.value)}
                   >
-                    <MenuItem value="all">All</MenuItem>
-                    {filterOptions.cities.map(c => (
-                      <MenuItem key={c} value={c}>{c}</MenuItem>
+                    <MenuItem value="">Any</MenuItem>
+                    {[1, 2, 3, 4, 5].map((num) => (
+                      <MenuItem key={num} value={num}>
+                        {num}
+                      </MenuItem>
                     ))}
                   </Select>
                 </FormControl>
               </Grid>
 
-              {/* clear */}
-              <Grid item xs={6} md={2.4}>
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="number"
+                  label="Min Rent"
+                  value={apiFilters.minRent}
+                  onChange={(e) => handleFilterChange('minRent', e.target.value)}
+                  placeholder="₹ Minimum"
+                />
+              </Grid>
+
+              <Grid item xs={12} md={3}>
+                <TextField
+                  fullWidth
+                  size="small"
+                  type="number"
+                  label="Max Rent"
+                  value={apiFilters.maxRent}
+                  onChange={(e) => handleFilterChange('maxRent', e.target.value)}
+                  placeholder="₹ Maximum"
+                />
+              </Grid>
+
+              <Grid item xs={12} md={3}>
                 <Button
                   variant="outlined"
                   fullWidth
                   startIcon={<Clear />}
-                  onClick={resetFilters}
-                  disabled={!activeFilterCount}
+                  onClick={clearAllFilters}
+                  disabled={activeFiltersCount === 0}
                 >
-                  Clear
+                  Clear All ({activeFiltersCount})
                 </Button>
-              </Grid>
-
-              {/* amenities */}
-              <Grid item xs={12}>
-                <Typography gutterBottom>Amenities</Typography>
-                <FormGroup row>
-                  {filterOptions.amenities.slice(0, 10).map(a => (
-                    <FormControlLabel
-                      key={a}
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={filters.amenities.includes(a)}
-                          onChange={e => toggleAmenity(a, e.target.checked)}
-                        />
-                      }
-                      label={a}
-                    />
-                  ))}
-                  {/* {filterOptions.amenities.length>10 && (
-                    <Typography variant="caption" color="text.secondary" sx={{ ml:2, alignSelf:'center' }}>
-                      +{filterOptions.amenities.length-10} more
-                    </Typography>
-                  )} */}
-                </FormGroup>
               </Grid>
             </Grid>
           </AccordionDetails>
+
         </Accordion>
       </Paper>
 
-      {filtered.length !== properties.length && (
-        <Alert severity="info" sx={{ mb: 3 }}>
-          Showing {filtered.length} of {properties.length} properties
+      {/* Error Alert */}
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }} onClose={() => setError(null)}>
+          {error}
         </Alert>
       )}
 
-      {/* table */}
-      <Paper
-        elevation={0}
-        sx={{ border: `1px solid ${alpha(theme.palette.divider, 0.12)}`, borderRadius: 2, overflow: 'hidden' }}
-      >
+      {/* Results Summary and Sorting */}
+      <Box display="flex" justifyContent="space-between" alignItems="center" mb={2}>
+        <Typography variant="body2" color="text.secondary">
+          Showing {properties.length} of {totalCount} properties
+        </Typography>
+
+        <Box display="flex" alignItems="center" gap={2}>
+          <FormControl size="small" sx={{ minWidth: 120 }}>
+            <InputLabel>Sort by</InputLabel>
+            <Select
+              value={sortBy}
+              label="Sort by"
+              onChange={(e) => setSortBy(e.target.value)}
+            >
+              <MenuItem value="createdAt">Created Date</MenuItem>
+              <MenuItem value="updatedAt">Updated Date</MenuItem>
+              <MenuItem value="rent">Rent Amount</MenuItem>
+              <MenuItem value="title">Title</MenuItem>
+            </Select>
+          </FormControl>
+
+          <Button
+            variant="outlined"
+            size="small"
+            onClick={() => setSortOrder(sortOrder === 'asc' ? 'desc' : 'asc')}
+            startIcon={<Sort />}
+          >
+            {sortOrder === 'asc' ? 'Ascending' : 'Descending'}
+          </Button>
+        </Box>
+      </Box>
+
+      {/* Properties Table */}
+      <Paper elevation={0} sx={{ border: `1px solid ${alpha(theme.palette.divider, 0.12)}`, borderRadius: 2 }}>
         <TableContainer sx={{ maxHeight: 600 }}>
           <Table stickyHeader size="small">
             <TableHead>
               <TableRow>
-                <TableCell>Title</TableCell>
-                <TableCell>Phone Number</TableCell>
-                <TableCell>Email</TableCell>
+                <TableCell>Property</TableCell>
+                <TableCell>Customer</TableCell>
+                <TableCell>Contact</TableCell>
                 <TableCell>Location</TableCell>
-                <TableCell sx={{ width: 110 }}>Type</TableCell>
-                <TableCell sx={{ width: 110 }}>Rent</TableCell>
-                <TableCell sx={{ width: 110 }}>Status</TableCell>
-                <TableCell sx={{ width: 110 }}>Created</TableCell>
-                <TableCell sx={{ width: 110 }}>Actions</TableCell>
+                <TableCell>Details</TableCell>
+                <TableCell>Rent</TableCell>
+                <TableCell>Status</TableCell>
+                <TableCell>Created</TableCell>
+                <TableCell>Actions</TableCell>
               </TableRow>
             </TableHead>
-
             <TableBody>
-              {paginated.map(p => (
-                <Fade in key={p.id}>
-                  <TableRow hover>
-                    <TableCell>
-                      <Typography variant="subtitle2">{p.title}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {p.bedrooms}BHK • {p.area}sqft
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Typography variant="body2">{p.location?.city || '-'}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {p.location?.state}
-                      </Typography>
-                    </TableCell>
-                    <TableCell>
-                      <Chip label={p.propertyType} variant="outlined" size="small" />
-                    </TableCell>
-                    <TableCell>₹{p.rent?.toLocaleString()}</TableCell>
-                    <TableCell>
-                      <Chip label={p.status} color={statusColor(p.status)} size="small" />
-                    </TableCell>
-                    <TableCell>{new Date(p.createdAt).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <Button
-                        variant="outlined"
-                        size="small"
-                        startIcon={<Visibility />}
-                        onClick={() => { setSelected(p); setDialogOpen(true); }}
-                      >
-                        View
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                </Fade>
+              {properties.map((property) => (
+                <TableRow key={property.id} hover>
+                  <TableCell>
+                    <Box display="flex" alignItems="center" gap={2}>
+                      {property.images?.[0] && (
+                        <Avatar
+                          src={property.images[0]}
+                          variant="rounded"
+                          sx={{ width: 40, height: 40 }}
+                        />
+                      )}
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight={600}>
+                          {property.title}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          ID: {property.id}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  <TableCell>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <Avatar sx={{ width: 32, height: 32, fontSize: '0.875rem' }}>
+                        {property.owner?.name?.charAt(0) || 'N'}
+                      </Avatar>
+                      <Box>
+                        <Typography variant="body2" fontWeight={500}>
+                          {property.owner?.name || 'N/A'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {property.owner?.verified ? '✓ Verified' : '⚠ Unverified'}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  <TableCell>
+                    <Stack spacing={0.5}>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Email sx={{ fontSize: 14 }} color="action" />
+                        <Typography variant="caption">
+                          {property.owner?.email || 'N/A'}
+                        </Typography>
+                      </Box>
+                      <Box display="flex" alignItems="center" gap={1}>
+                        <Phone sx={{ fontSize: 14 }} color="action" />
+                        <Typography variant="caption">
+                          {property.owner?.phone || 'N/A'}
+                        </Typography>
+                      </Box>
+                    </Stack>
+                  </TableCell>
+
+                  <TableCell>
+                    <Box display="flex" alignItems="center" gap={1}>
+                      <LocationOn sx={{ fontSize: 14 }} color="action" />
+                      <Box>
+                        <Typography variant="body2">
+                          {property.location?.city || '-'}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {property.location?.state}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  </TableCell>
+
+                  <TableCell>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Box display="flex" alignItems="center" gap={0.5}>
+                        <Bed sx={{ fontSize: 14 }} color="action" />
+                        <Typography variant="caption">{property.bedrooms}</Typography>
+                      </Box>
+                      <Box display="flex" alignItems="center" gap={0.5}>
+                        <Bathtub sx={{ fontSize: 14 }} color="action" />
+                        <Typography variant="caption">{property.bathrooms}</Typography>
+                      </Box>
+                      <Box display="flex" alignItems="center" gap={0.5}>
+                        <SquareFoot sx={{ fontSize: 14 }} color="action" />
+                        <Typography variant="caption">{property.area}sqft</Typography>
+                      </Box>
+                    </Stack>
+                  </TableCell>
+
+                  <TableCell>
+                    <Typography variant="body2" fontWeight={600} color="primary">
+                      {formatCurrency(property.rent)}
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      /month
+                    </Typography>
+                  </TableCell>
+
+                  <TableCell>
+                    <Chip
+                      label={property.status}
+                      color={getStatusColor(property.status)}
+                      size="small"
+                      icon={getStatusIcon(property.status)}
+                    />
+                  </TableCell>
+
+                  <TableCell>
+                    <Typography variant="caption">
+                      {new Date(property.createdAt).toLocaleDateString()}
+                    </Typography>
+                  </TableCell>
+
+                  <TableCell>
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      startIcon={<Visibility />}
+                      onClick={() => {
+                        setSelectedProperty(property);
+                        setDialogOpen(true);
+                      }}
+                    >
+                      View
+                    </Button>
+                  </TableCell>
+                </TableRow>
               ))}
 
-              {!paginated.length && (
+              {properties.length === 0 && (
                 <TableRow>
-                  <TableCell colSpan={7}>
-                    <Box display="flex" justifyContent="center" py={5}>
-                      <Typography color="text.secondary">No properties found</Typography>
+                  <TableCell colSpan={9}>
+                    <Box display="flex" flexDirection="column" alignItems="center" py={8}>
+                      <Home sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
+                      <Typography variant="h6" color="text.secondary" gutterBottom>
+                        No properties found
+                      </Typography>
+                      <Typography variant="body2" color="text.secondary">
+                        Try adjusting your filters or search terms
+                      </Typography>
                     </Box>
                   </TableCell>
                 </TableRow>
@@ -450,115 +856,280 @@ const PropertiesTab = () => {
 
         <TablePagination
           rowsPerPageOptions={[5, 10, 25, 50]}
-          count={filtered.length}
+          component="div"
+          count={totalCount}
           rowsPerPage={rowsPerPage}
           page={page}
-          onPageChange={(_, p) => setPage(p)}
-          onRowsPerPageChange={e => { setRPP(+e.target.value); setPage(0); }}
+          onPageChange={(_, newPage) => setPage(newPage)}
+          onRowsPerPageChange={(e) => {
+            setRowsPerPage(parseInt(e.target.value, 10));
+            setPage(0);
+          }}
         />
       </Paper>
 
-      {/* ---------- detail dialog ---------- */}
+      {/* Property Details Dialog */}
       <Dialog
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
         maxWidth="lg"
         fullWidth
+        PaperProps={{ sx: { borderRadius: 2 } }}
       >
         <DialogTitle>
-          Property Details
-          {selected && (
-            <Chip label={selected.status} color={statusColor(selected.status)} size="small" sx={{ ml: 2 }} />
-          )}
+          <Box display="flex" justifyContent="space-between" alignItems="center">
+            <Typography variant="h5" fontWeight={600}>
+              Property Details
+            </Typography>
+            {selectedProperty && (
+              <Chip
+                label={selectedProperty.status}
+                color={getStatusColor(selectedProperty.status)}
+                icon={getStatusIcon(selectedProperty.status)}
+              />
+            )}
+          </Box>
         </DialogTitle>
 
         <DialogContent dividers>
-          {selected && (
+          {selectedProperty && (
             <Grid container spacing={3}>
               <Grid item xs={12} md={8}>
-                {selected.images?.length && (
-                  <CardMedia
-                    component="img"
-                    height="300"
-                    image={selected.images[0]}
-                    alt={selected.title}
-                    sx={{ borderRadius: 1, mb: 2 }}
-                  />
+                {/* Property Images */}
+                {selectedProperty.images?.length > 0 && (
+                  <Box mb={3}>
+                    <CardMedia
+                      component="img"
+                      height="300"
+                      image={selectedProperty.images[0]}
+                      alt={selectedProperty.title}
+                      sx={{ borderRadius: 2, mb: 2 }}
+                    />
+                    {selectedProperty.images.length > 1 && (
+                      <Grid container spacing={1}>
+                        {selectedProperty.images.slice(1, 4).map((img, idx) => (
+                          <Grid item xs={4} key={idx}>
+                            <CardMedia
+                              component="img"
+                              height="80"
+                              image={img}
+                              sx={{ borderRadius: 1 }}
+                            />
+                          </Grid>
+                        ))}
+                      </Grid>
+                    )}
+                  </Box>
                 )}
 
-                <Typography variant="h5" gutterBottom>{selected.title}</Typography>
-                <Typography color="text.secondary" gutterBottom>
-                  {selected.location?.address}, {selected.location?.city}, {selected.location?.state}
+                <Typography variant="h4" gutterBottom fontWeight={700}>
+                  {selectedProperty.title}
                 </Typography>
 
-                <Box my={2}>
-                  <Typography variant="h4" color="primary">
-                    ₹{selected.rent?.toLocaleString()} /month
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    Deposit: ₹{selected.deposit?.toLocaleString()}
+                <Box display="flex" alignItems="center" gap={1} mb={3}>
+                  <LocationOn color="action" />
+                  <Typography variant="body1" color="text.secondary">
+                    {selectedProperty.location?.address}, {selectedProperty.location?.city}, {selectedProperty.location?.state}
                   </Typography>
                 </Box>
 
-                <Grid container spacing={2} mb={2}>
-                  {[
-                    ['Type', selected.propertyType],
-                    ['Bedrooms', selected.bedrooms],
-                    ['Bathrooms', selected.bathrooms],
-                    ['Area', `${selected.area} sqft`]
-                  ].map(([k, v]) => (
-                    <Grid item key={k}>
-                      <Typography variant="body2"><strong>{k}:</strong> {v}</Typography>
+                <Box display="flex" alignItems="baseline" gap={2} mb={3}>
+                  <Typography variant="h3" color="primary" fontWeight={700}>
+                    {formatCurrency(selectedProperty.rent)}
+                  </Typography>
+                  <Typography variant="h6" color="text.secondary">
+                    per month
+                  </Typography>
+                </Box>
+
+                <Typography variant="body2" color="text.secondary" gutterBottom>
+                  Security Deposit: {formatCurrency(selectedProperty.deposit)}
+                </Typography>
+
+                {/* Property Features */}
+                <Paper elevation={0} sx={{ p: 2, bgcolor: 'grey.50', borderRadius: 2, mb: 3 }}>
+                  <Grid container spacing={3}>
+                    <Grid item xs={3}>
+                      <Box textAlign="center">
+                        <Home sx={{ fontSize: 32, color: 'primary.main', mb: 1 }} />
+                        <Typography variant="h6" fontWeight={600}>
+                          {selectedProperty.propertyType}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Property Type
+                        </Typography>
+                      </Box>
                     </Grid>
-                  ))}
-                </Grid>
+                    <Grid item xs={3}>
+                      <Box textAlign="center">
+                        <Bed sx={{ fontSize: 32, color: 'primary.main', mb: 1 }} />
+                        <Typography variant="h6" fontWeight={600}>
+                          {selectedProperty.bedrooms}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Bedrooms
+                        </Typography>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={3}>
+                      <Box textAlign="center">
+                        <Bathtub sx={{ fontSize: 32, color: 'primary.main', mb: 1 }} />
+                        <Typography variant="h6" fontWeight={600}>
+                          {selectedProperty.bathrooms}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Bathrooms
+                        </Typography>
+                      </Box>
+                    </Grid>
+                    <Grid item xs={3}>
+                      <Box textAlign="center">
+                        <SquareFoot sx={{ fontSize: 32, color: 'primary.main', mb: 1 }} />
+                        <Typography variant="h6" fontWeight={600}>
+                          {selectedProperty.area}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          Sq Ft
+                        </Typography>
+                      </Box>
+                    </Grid>
+                  </Grid>
+                </Paper>
 
-                <Typography variant="body1" paragraph>{selected.description}</Typography>
+                <Typography variant="h6" gutterBottom fontWeight={600}>
+                  Description
+                </Typography>
+                <Typography variant="body1" paragraph>
+                  {selectedProperty.description}
+                </Typography>
 
-                {!!selected.amenities?.length && (
-                  <Box mb={2}>
-                    <Typography variant="subtitle2" gutterBottom>Amenities</Typography>
+                {selectedProperty.amenities?.length > 0 && (
+                  <Box mb={3}>
+                    <Typography variant="h6" gutterBottom fontWeight={600}>
+                      Amenities
+                    </Typography>
                     <Box display="flex" flexWrap="wrap" gap={1}>
-                      {selected.amenities.map(a => (
-                        <Chip key={a} label={a} variant="outlined" size="small" />
+                      {selectedProperty.amenities.map((amenity) => (
+                        <Chip
+                          key={amenity}
+                          label={amenity}
+                          variant="outlined"
+                          color="primary"
+                          size="small"
+                        />
                       ))}
                     </Box>
                   </Box>
                 )}
               </Grid>
 
+              {/* Owner Information Sidebar */}
               <Grid item xs={12} md={4}>
-                <Card>
+                <Card sx={{ mb: 3 }}>
                   <CardContent>
-                    <Typography variant="h6" gutterBottom>Owner Information</Typography>
+                    <Typography variant="h6" gutterBottom fontWeight={600}>
+                      Owner Information
+                    </Typography>
                     <Divider sx={{ mb: 2 }} />
-                    {selected.owner ? (
-                      <>
-                        {[
-                          ['ID Proof Type', selected.owner.idProofType],
-                          ['ID Proof Number', selected.owner.idProofNumber],
-                          ['Verified', selected.owner.verified ? 'Yes' : 'No'],
-                          ['Total Properties', selected.owner.properties?.length || 0]
-                        ].map(([k, v]) => (
-                          <Typography key={k} paragraph><strong>{k}:</strong> {v}</Typography>
-                        ))}
 
-                        {selected.owner.idProofImageUrl && (
-                          <Box mt={2}>
-                            <Typography variant="subtitle2" gutterBottom>ID Proof Image</Typography>
-                            <CardMedia
-                              component="img"
-                              height="150"
-                              image={selected.owner.idProofImageUrl}
-                              alt="ID Proof"
-                              sx={{ borderRadius: 1 }}
+                    {selectedProperty.owner ? (
+                      <Stack spacing={2}>
+                        <Box display="flex" alignItems="center" gap={2}>
+                          <Avatar sx={{ width: 56, height: 56 }}>
+                            {selectedProperty.owner.name?.charAt(0) || 'N'}
+                          </Avatar>
+                          <Box>
+                            <Typography variant="h6" fontWeight={600}>
+                              {selectedProperty.owner.name}
+                            </Typography>
+                            <Chip
+                              label={selectedProperty.owner.verified ? 'Verified' : 'Unverified'}
+                              color={selectedProperty.owner.verified ? 'success' : 'warning'}
+                              size="small"
                             />
                           </Box>
-                        )}
-                      </>
+                        </Box>
+
+                        <List dense>
+                          <ListItem>
+                            <ListItemAvatar>
+                              <Avatar sx={{ width: 32, height: 32 }}>
+                                <Email sx={{ fontSize: 16 }} />
+                              </Avatar>
+                            </ListItemAvatar>
+                            <ListItemText
+                              primary="Email"
+                              secondary={selectedProperty.owner.email}
+                            />
+                          </ListItem>
+
+                          {selectedProperty.owner.phone && (
+                            <ListItem>
+                              <ListItemAvatar>
+                                <Avatar sx={{ width: 32, height: 32 }}>
+                                  <Phone sx={{ fontSize: 16 }} />
+                                </Avatar>
+                              </ListItemAvatar>
+                              <ListItemText
+                                primary="Phone"
+                                secondary={selectedProperty.owner.phone}
+                              />
+                            </ListItem>
+                          )}
+
+                          <ListItem>
+                            <ListItemAvatar>
+                              <Avatar sx={{ width: 32, height: 32 }}>
+                                <Person sx={{ fontSize: 16 }} />
+                              </Avatar>
+                            </ListItemAvatar>
+                            <ListItemText
+                              primary="Role"
+                              secondary={selectedProperty.owner.role}
+                            />
+                          </ListItem>
+                        </List>
+                      </Stack>
                     ) : (
-                      <Typography color="text.secondary">Owner information not available</Typography>
+                      <Typography color="text.secondary">
+                        Owner information not available
+                      </Typography>
                     )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardContent>
+                    <Typography variant="h6" gutterBottom fontWeight={600}>
+                      Property Timeline
+                    </Typography>
+                    <Divider sx={{ mb: 2 }} />
+
+                    <List dense>
+                      <ListItem>
+                        <ListItemAvatar>
+                          <Avatar sx={{ width: 32, height: 32 }}>
+                            <CalendarToday sx={{ fontSize: 16 }} />
+                          </Avatar>
+                        </ListItemAvatar>
+                        <ListItemText
+                          primary="Created"
+                          secondary={new Date(selectedProperty.createdAt).toLocaleString()}
+                        />
+                      </ListItem>
+
+                      <ListItem>
+                        <ListItemAvatar>
+                          <Avatar sx={{ width: 32, height: 32 }}>
+                            <CalendarToday sx={{ fontSize: 16 }} />
+                          </Avatar>
+                        </ListItemAvatar>
+                        <ListItemText
+                          primary="Last Updated"
+                          secondary={new Date(selectedProperty.updatedAt || selectedProperty.createdAt).toLocaleString()}
+                        />
+                      </ListItem>
+                    </List>
                   </CardContent>
                 </Card>
               </Grid>
@@ -566,56 +1137,74 @@ const PropertiesTab = () => {
           )}
         </DialogContent>
 
-        <DialogActions>
-
-          {selected?.status === 'published' && (
-            <>
-              <Button
-                variant="contained"
-                color="error"
-                disabled={reviewLoading}
-                onClick={() => callReview(selected.id, 'soldOut')}
-              >
-                {reviewLoading ? <CircularProgress size={18} /> : 'Sold Out'}
-              </Button>
-            </>
-          )}
-
-
+        <DialogActions sx={{ p: 3, gap: 1 }}>
           <Button onClick={() => setDialogOpen(false)}>Close</Button>
 
-          {selected?.status === 'pending' && (
+          {/* Actions for pending properties */}
+          {selectedProperty?.status === 'pending' && (
             <>
               <Button
                 color="error"
-                disabled={reviewLoading}
-                onClick={() => callReview(selected.id, 'rejected')}
+                variant="outlined"
+                disabled={actionLoading}
+                onClick={() => handlePropertyAction(selectedProperty.id, 'review', 'rejected')}
+                startIcon={actionLoading ? <CircularProgress size={16} /> : <Cancel />}
               >
-                {reviewLoading ? <CircularProgress size={18} /> : 'Reject'}
+                Reject
               </Button>
               <Button
-                variant="contained"
                 color="success"
-                disabled={reviewLoading}
-                onClick={() => callReview(selected.id, 'approved')}
+                variant="contained"
+                disabled={actionLoading}
+                onClick={() => handlePropertyAction(selectedProperty.id, 'review', 'approved')}
+                startIcon={actionLoading ? <CircularProgress size={16} /> : <CheckCircle />}
               >
-                {reviewLoading ? <CircularProgress size={18} /> : 'Approve'}
+                Approve
               </Button>
             </>
           )}
 
-          {selected?.status === 'approved' && (
+          {/* Actions for approved properties */}
+          {selectedProperty?.status === 'approved' && (
             <Button
-              variant="contained"
               color="primary"
-              disabled={publishLoading}
-              onClick={() => callPublish(selected.id)}
+              variant="contained"
+              disabled={actionLoading}
+              onClick={() => handlePropertyAction(selectedProperty.id, 'publish', 'published')}
+              startIcon={actionLoading ? <CircularProgress size={16} /> : <Publish />}
             >
-              {publishLoading ? <CircularProgress size={18} /> : 'Publish'}
+              Publish
+            </Button>
+          )}
+
+          {/* Actions for published properties */}
+          {selectedProperty?.status === 'published' && (
+            <Button
+              color="secondary"
+              variant="contained"
+              disabled={actionLoading}
+              onClick={() => handlePropertyAction(selectedProperty.id, 'markSold', 'sold')}
+              startIcon={actionLoading ? <CircularProgress size={16} /> : <CheckCircleOutline />}
+            >
+              Mark as Sold
             </Button>
           )}
         </DialogActions>
       </Dialog>
+
+      <Snackbar
+        open={snackbar.open}
+        autoHideDuration={4000}
+        onClose={() => setSnackbar({ ...snackbar, open: false })}
+      >
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
+          severity={snackbar.severity}
+          variant="filled"
+        >
+          {snackbar.message}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };
