@@ -1,7 +1,7 @@
-// components/Navbar.jsx
+// src/components/Navbar.jsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { FaBars, FaTimes, FaCube } from "react-icons/fa";
 import LogoImg from "../../../public/logo.png"; // Replace with your logo path
 
@@ -36,8 +36,21 @@ const resourcesLinks = {
 const Navbar = () => {
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [isResourcesOpen, setIsResourcesOpen] = useState(false);
+  const resourcesRef = useRef(null);
 
   const toggleMenu = () => setIsMenuOpen(!isMenuOpen);
+  const toggleResources = () => setIsResourcesOpen(!isResourcesOpen);
+
+  // Close Resources dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event) => {
+      if (resourcesRef.current && !resourcesRef.current.contains(event.target)) {
+        setIsResourcesOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   return (
     <nav className="w-full bg-white fixed top-0 left-0 z-50 shadow-sm">
@@ -55,23 +68,20 @@ const Navbar = () => {
             </li>
           ))}
 
-          {/* Resources Dropdown */}
-          <div
-            className="group inline-block"
-            onMouseEnter={() => setIsResourcesOpen(true)}
-            onMouseLeave={() => setIsResourcesOpen(false)}
-          >
+          {/* Resources Dropdown - Click version */}
+          <div ref={resourcesRef} className="relative inline-block">
             <button
               type="button"
               className="hover:text-blue-600 font-medium"
               aria-haspopup="true"
               aria-expanded={isResourcesOpen}
+              onClick={toggleResources}
             >
               Resources ▾
             </button>
 
             {isResourcesOpen && (
-              <div className="absolute left-0 top-full w-screen mt-2 bg-white border-t shadow-xl z-50">
+              <div className="absolute left-0 top-full mt-2 w-screen bg-white border-t shadow-xl z-50">
                 <div className="container mx-auto p-6 grid grid-cols-3 gap-6">
                   {Object.entries(resourcesLinks).map(([section, items]) => (
                     <div key={section}>
@@ -83,13 +93,9 @@ const Navbar = () => {
                               href={item.href}
                               className="flex items-start gap-4 py-3 hover:bg-gray-50 rounded px-1 transition"
                             >
-                              {/* ICON WITHOUT CIRCLE, BLACK */}
                               <FaCube size={16} className="text-black flex-shrink-0 mt-1" />
-
                               <div>
-                                <div className="text-base font-semibold text-gray-900">
-                                  {item.name}
-                                </div>
+                                <div className="text-base font-semibold text-gray-900">{item.name}</div>
                                 <div className="text-sm text-gray-600">{item.desc}</div>
                               </div>
                             </a>
@@ -136,7 +142,7 @@ const Navbar = () => {
             <li className="w-full">
               <button
                 className="w-full text-left font-medium hover:text-blue-600"
-                onClick={() => setIsResourcesOpen((s) => !s)}
+                onClick={toggleResources}
               >
                 Resources ▾
               </button>
@@ -156,7 +162,6 @@ const Navbar = () => {
                               }}
                               className="flex items-start gap-3"
                             >
-                              {/* ICON WITHOUT CIRCLE, BLACK */}
                               <FaCube size={14} className="text-black mt-1 flex-shrink-0" />
                               <div>
                                 <div className="font-semibold">{item.name}</div>
